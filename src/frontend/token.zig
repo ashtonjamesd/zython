@@ -1,0 +1,85 @@
+pub const TokenType = enum {
+    Identifier,
+    Integer,
+    String,
+
+    // operators
+    DoubleEquals,
+    NotEquals,
+    LessThan,
+    GreaterThan,
+    LessThanOrEquals,
+    GreaterThanOrEquals,
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Modulo,
+    Exponentiation,
+    FloorDivision,
+    PlusEquals,
+    MinusEquals,
+    MultiplyEquals,
+    DivideEquals,
+    ModuloEquals,
+    FloorDivideEquals,
+    ExponentEquals,
+    BitwiseAndEquals,
+    BitwiseOrEquals,
+    BitwiseXorEquals,
+    BitwiseLeftShiftEquals,
+    BitwiseRightShiftEquals,
+    WalrusOperator,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    BitwiseLeftShift,
+    BitwiseRightShift,
+
+    Newline,
+    Whitespace,
+    Indent,
+    Dedent,
+    LeftParen,
+    RightParen,
+    True,
+    False,
+    Colon,
+    SingleEquals,
+    Comma,
+
+    // keywords
+    And,
+    Or,
+    Not,
+    Def,
+    Assert,
+    Raise,
+    If,
+    Pass,
+    Else,
+    While,
+    Break,
+    Continue,
+    For,
+    In,
+
+    Error,
+};
+
+pub const Token = struct {
+    pub fn new(tokenType: TokenType, lexeme: []const u8, line: u32, column: u32) Token {
+        return Token{
+            .tokenType = tokenType,
+            .lexeme = lexeme,
+            .line = line,
+            .column = column,
+        };
+    }
+
+    tokenType: TokenType,
+    lexeme: []const u8,
+    line: u32,
+    column: u32,
+};
