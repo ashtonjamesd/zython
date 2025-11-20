@@ -23,6 +23,8 @@ pub const AstNodeType = enum {
     AstForStatement,
     AstBreak,
     AstContinue,
+    AstReturn,
+    AstTernary,
     AstError,
 };
 
@@ -72,6 +74,8 @@ pub const AstNode = struct {
         AstForStatement: AstForStatementNode,
         AstBreak: AstBreakNode,
         AstContinue: AstContinueNode,
+        AstReturn: AstReturnNode,
+        AstTernary: AstTernaryNode,
         AstError: AstErrorNode,
     },
 };
@@ -280,6 +284,26 @@ pub const AstUnaryExpressionNode = struct {
     }
 };
 
+pub const AstReturnNode = struct {
+    value: *AstNode,
+
+    pub fn new(allocator: std.mem.Allocator, value: *AstNode) *AstNode {
+        const node = allocator.create(AstNode) catch {
+            @panic("Failed to allocate memory for AstReturnNode");
+        };
+
+        node.* = AstNode{
+            .as = .{
+                .AstReturn = AstReturnNode{
+                    .value = value,
+                },
+            },
+        };
+
+        return node;
+    }
+};
+
 pub const AstRaiseNode = struct {
     value: *AstNode,
 
@@ -374,6 +398,30 @@ pub const AstVariableDeclarationNode = struct {
                 .AstVariableDeclaration = AstVariableDeclarationNode{
                     .name = name,
                     .value = value,
+                },
+            },
+        };
+
+        return node;
+    }
+};
+
+pub const AstTernaryNode = struct {
+    value_if_true: *AstNode,
+    condition: *AstNode,
+    value_if_false: *AstNode,
+
+    pub fn new(allocator: std.mem.Allocator, value_if_true: *AstNode, condition: *AstNode, value_if_false: *AstNode) *AstNode {
+        const node = allocator.create(AstNode) catch {
+            @panic("Failed to allocate memory for AstTernaryNode");
+        };
+
+        node.* = AstNode{
+            .as = .{
+                .AstTernary = AstTernaryNode{
+                    .value_if_true = value_if_true,
+                    .condition = condition,
+                    .value_if_false = value_if_false,
                 },
             },
         };

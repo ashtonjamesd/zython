@@ -64,6 +64,7 @@ pub const TokenType = enum {
     Continue,
     For,
     In,
+    Return,
 
     Error,
 };

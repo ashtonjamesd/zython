@@ -32,7 +32,8 @@ pub const Instruction = enum(u8) {
     Jump = 0x1e,
 
     PushConstantWide = 0x1f,
+    Return = 0x20,
 
     // raise a runtime exception
-    // Raise = 0x20,
+    // Raise = 0x21,
 };

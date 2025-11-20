@@ -1,36 +1,56 @@
 # zython
 
-A fast python interpreter written in Zig.
+Zython is a lightweight and fast Python interpreter that aims to support the vast majority of Python syntax and core language features, built entirely in Zig.
 
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Features
 
-**Data types**
-- numbers
-- booleans
-- strings
+### Supported Data Types
+- Numbers
+- Booleans
+- Strings
 
+### Operators
+- Arithmetic: `+`, `-`, `**`, etc
+- Logical: `and`, `or`, `not`
+- Bitwise: `&`, `|`, `>>`, etc
+- Comparison: `<`, `>`, etc
+- Grouping: `()`
+- Walrus operator: `:=`
 
-**Operators**
-- Arithmetic operators (+, /, **, etc)
-- Logical operators (not, and, or)
-- Bitwise operators (except shifts)
-- Comparison operators (<, ==, etc)
-- Walrus operator
+### Built-in Functions
+- `print()`
+- `len()`
+- `abs()`
+- `int()`
+- `ord()`
 
-
-**Built-ins**
-- print
-
-
-**Misc**
-- If-else statements
-- Pass
-- While loops, break, continue
+### Control Flow
+- `if` / `else` (not elif yet)
+- `pass`
+- `while` loops with `break` and `continue`
 - Global variables
+- Functions with `def` and `return`
+- Ternary expressions
 
 See `/examples`.
 
+## Installation
+
+Currently, you can build Zython from source:
+
+```bash
+git clone https://github.com/yourusername/zython.git
+cd zython
+zig build
+```
+
+### Usage
+
+```
+./zython examples/hello_world.py
+```
 
 # Resources
 

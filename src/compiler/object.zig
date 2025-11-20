@@ -22,7 +22,7 @@ pub const Object = struct {
         Function: FunctionObject,
     },
 
-    pub fn newIntegerObject(value: i32) Object {
+    pub inline fn newIntegerObject(value: i32) Object {
         return Object{
             .value = .{
                 .Integer = value,
@@ -30,7 +30,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn newStringObject(value: []const u8) Object {
+    pub inline fn newStringObject(value: []const u8) Object {
         return Object{
             .value = .{
                 .String = value,
@@ -38,7 +38,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn newBoolObject(value: bool) Object {
+    pub inline fn newBoolObject(value: bool) Object {
         return Object{
             .value = .{
                 .Boolean = value,
@@ -46,7 +46,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn newIdentifierObject(value: []const u8) Object {
+    pub inline fn newIdentifierObject(value: []const u8) Object {
         return Object{
             .value = .{
                 .Identifier = value,
@@ -54,7 +54,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn newFunctionObject(name: []const u8, arity: u8, bytecode_start: usize, bytecode_end: usize) Object {
+    pub inline fn newFunctionObject(name: []const u8, arity: u8, bytecode_start: usize, bytecode_end: usize) Object {
         return Object{
             .value = .{
                 .Function = FunctionObject{

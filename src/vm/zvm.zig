@@ -8,6 +8,8 @@ const builtin = @import("builtins.zig");
 const callstack = @import("callstack.zig");
 
 const STACK_SIZE = 1024;
+const RETURN_STACK_SIZE = 64;
+const STDOUT_BUFFER_SIZE = 1024;
 
 pub const ZythonVm = struct {
     program: compiler.Program,
@@ -16,7 +18,9 @@ pub const ZythonVm = struct {
     sp: usize = 0,
     alloc: std.mem.Allocator,
     callstack: callstack.CallStack,
-    stdoutBuffer: [1024]u8 = undefined,
+    returnStack: [RETURN_STACK_SIZE]u32 = undefined,
+    returnSp: usize = 0,
+    stdoutBuffer: [STDOUT_BUFFER_SIZE]u8 = undefined,
     stdoutWriter: std.fs.File.Writer,
 
     const OpHandler = fn (*ZythonVm) void;
@@ -51,7 +55,7 @@ pub const ZythonVm = struct {
         const start = std.time.nanoTimestamp();
 
         while (self.pc < self.program.bytecode.items.len) {
-            self.executeInstr();
+            self.executeInstruction();
             self.tick();
         }
 
@@ -66,12 +70,22 @@ pub const ZythonVm = struct {
         std.debug.print("Execution took {d:.3} ms\n", .{elapsed_ms});
     }
 
-    inline fn executeInstr(self: *ZythonVm) void {
+    inline fn executeIntAdd(self: *ZythonVm) void {
+        const b = self.stack[self.sp - 1].value.Integer;
+        const a = self.stack[self.sp - 2].value.Integer;
+
+        const result = a +% b;
+
+        self.stack[self.sp - 2].value.Integer = result;
+        self.sp -= 1;
+    }
+
+    inline fn executeInstruction(self: *ZythonVm) void {
         const instr = self.program.bytecode.items[self.pc];
 
         switch (instr) {
             0x00 => self.executePush(),
-            0x01 => self.executeArithmeticBinary(operatorType.Plus),
+            0x01 => self.executeIntAdd(),
             0x02 => self.executeArithmeticBinary(operatorType.Minus),
             0x03 => self.executeArithmeticBinary(operatorType.Multiply),
             0x04 => self.executeArithmeticBinary(operatorType.Divide),
@@ -91,7 +105,7 @@ pub const ZythonVm = struct {
             0x12 => self.executeUnary(operatorType.Plus),
             0x13 => self.executeRelationalBinary(operatorType.LessThan),
             0x14 => self.executeRelationalBinary(operatorType.GreaterThan),
-            0x15 => self.executeRelationalBinary(operatorType.LessThanOrEquals),
+            0x15 => self.executeLessThanOrEquals(),
             0x16 => self.executeRelationalBinary(operatorType.GreaterThanOrEquals),
             0x17 => self.executeComparativeBinary(operatorType.Equals),
             0x18 => self.executeComparativeBinary(operatorType.NotEquals),
@@ -102,6 +116,7 @@ pub const ZythonVm = struct {
             0x1d => self.executeNop(),
             0x1e => self.executeJump(),
             0x1f => self.executePushConstantWide(),
+            0x20 => self.executeReturn(),
             else => @panic("Unknown opcode in zvm"),
         }
     }
@@ -137,13 +152,7 @@ pub const ZythonVm = struct {
     inline fn executeJumpIfFalse(self: *ZythonVm) void {
         const conditionObj = self.pop();
 
-        if (conditionObj.value != .Boolean) {
-            @panic("JumpIfFalse expects a boolean value");
-        }
-
-        const condition = conditionObj.value.Boolean;
-
-        if (!condition) {
+        if (!conditionObj.value.Boolean) {
             self.executeJump();
         } else {
             self.tick();
@@ -176,13 +185,48 @@ pub const ZythonVm = struct {
         if (std.mem.eql(u8, callee.value.Identifier, "print")) {
             const argument = self.pop();
             builtin.printObject(self, argument);
-        } else {}
+        } else if (std.mem.eql(u8, callee.value.Identifier, "abs")) {
+            const argument = self.pop();
+            const result = builtin.abs(self, argument);
+            self.push(object.Object.newIntegerObject(@intCast(result)));
+        } else if (std.mem.eql(u8, callee.value.Identifier, "len")) {
+            const argument = self.pop();
+            const result = builtin.len(self, argument);
+            self.push(object.Object.newIntegerObject(@intCast(result)));
+        } else if (std.mem.eql(u8, callee.value.Identifier, "int")) {
+            const argument = self.pop();
+            const result = builtin.int(self, argument);
+            self.push(object.Object.newIntegerObject(@intCast(result)));
+        } else if (std.mem.eql(u8, callee.value.Identifier, "ord")) {
+            const argument = self.pop();
+            const result = builtin.ord(self, argument);
+            self.push(object.Object.newIntegerObject(@intCast(result)));
+        } else {
+            if (self.program.globalVariables.get(callee.value.Identifier)) |func| {
+                const function = func.value.Function;
+
+                self.returnStack[self.returnSp] = self.pc;
+                self.returnSp += 1;
+
+                // why n - 1 you ask, i do not know
+                self.pc = @intCast(function.bytecode_start - 1);
+            } else {
+                std.debug.print("Unknown function: {s}\n", .{callee.value.Identifier});
+                @panic("Unknown function called");
+            }
+        }
+    }
+
+    inline fn executeReturn(self: *ZythonVm) void {
+        self.returnSp -= 1;
+        self.pc = self.returnStack[self.returnSp];
     }
 
     inline fn executePush(self: *ZythonVm) void {
         self.tick();
 
-        const constant = self.pluckConstant();
+        const index = self.currentInstruction();
+        const constant = self.constantAt(index);
         self.push(constant);
     }
 
@@ -268,6 +312,16 @@ pub const ZythonVm = struct {
         self.push(obj);
     }
 
+    inline fn executeLessThanOrEquals(self: *ZythonVm) void {
+        const bObj = self.pop();
+        const aObj = self.pop();
+
+        const result = aObj.value.Integer <= bObj.value.Integer;
+
+        self.stack[self.sp] = object.Object.newBoolObject(result);
+        self.sp += 1;
+    }
+
     inline fn executeRelationalBinary(self: *ZythonVm, operator: operatorType) void {
         const bObj = self.pop();
         const aObj = self.pop();
@@ -306,10 +360,8 @@ pub const ZythonVm = struct {
             operatorType.BitwiseAnd => a & b,
             operatorType.BitwiseOr => a | b,
             operatorType.BitwiseXor => a ^ b,
-            operatorType.BitwiseLeftShift => @panic("idk"),
-            operatorType.BitwiseRightShift => @panic("idk"),
-            // operatorType.BitwiseLeftShift => a << b,
-            // operatorType.BitwiseRightShift => a >> b,
+            operatorType.BitwiseLeftShift => std.math.shl(i32, a, b),
+            operatorType.BitwiseRightShift => std.math.shr(i32, a, b),
             else => @panic("invalid arithmetic binary operator"),
         };
 
@@ -317,18 +369,9 @@ pub const ZythonVm = struct {
         self.sp += 1;
     }
 
-    inline fn pluckConstant(self: *ZythonVm) object.Object {
-        const index = self.currentInstruction();
-        const constant = self.constantAt(index);
-
-        return constant;
-    }
-
     inline fn pop(self: *ZythonVm) object.Object {
         self.sp -= 1;
-        const n = self.stack[self.sp];
-
-        return n;
+        return self.stack[self.sp];
     }
 
     inline fn push(self: *ZythonVm, value: object.Object) void {

@@ -1,6 +1,4 @@
 i = 1
-n = 1000000
-
-while i <= n:
-    print(i)
+while i <= 1000000:
     i += 1
+    print(i)

@@ -125,7 +125,7 @@ pub const Lexer = struct {
 
     fn tokenizeNext(self: *Lexer) Token {
         switch (self.currentChar()) {
-            'a'...'z', 'A'...'Z' => return self.tokenizeIdentifier(),
+            'a'...'z', 'A'...'Z', '_' => return self.tokenizeIdentifier(),
             '0'...'9' => return self.tokenizeInteger(),
             '\n' => return self.newToken(TokenType.Newline, "\\n"),
             '\"' => return self.tokenizeString(),
@@ -150,7 +150,7 @@ pub const Lexer = struct {
 
     fn tokenizeIdentifier(self: *Lexer) Token {
         const start = self.position;
-        while (!self.isEnd() and std.ascii.isAlphabetic(self.currentChar())) {
+        while (!self.isEnd() and (std.ascii.isAlphabetic(self.currentChar()) or self.currentChar() == '_')) {
             self.advance();
         }
 
@@ -190,6 +190,8 @@ pub const Lexer = struct {
             tokenType = TokenType.For;
         } else if (std.mem.eql(u8, lexeme, "in")) {
             tokenType = TokenType.In;
+        } else if (std.mem.eql(u8, lexeme, "return")) {
+            tokenType = TokenType.Return;
         }
 
         return self.newToken(tokenType, lexeme);

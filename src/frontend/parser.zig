@@ -87,6 +87,14 @@ pub const Parser = struct {
             .AstRaise => {
                 self.deinitNode(node.as.AstRaise.value);
             },
+            .AstReturn => {
+                self.deinitNode(node.as.AstReturn.value);
+            },
+            .AstTernary => {
+                self.deinitNode(node.as.AstTernary.value_if_true);
+                self.deinitNode(node.as.AstTernary.condition);
+                self.deinitNode(node.as.AstTernary.value_if_false);
+            },
             else => {},
         }
 
@@ -126,9 +134,33 @@ pub const Parser = struct {
                     self.printNode(stmt, depth + 2);
                 }
             },
-            .AstIfStatement => {},
-            .AstWhileStatement => {},
-            .AstForStatement => {},
+            .AstIfStatement => {
+                std.debug.print("If\n", .{});
+            },
+            .AstWhileStatement => {
+                std.debug.print("While\n", .{});
+            },
+            .AstForStatement => {
+                std.debug.print("For\n", .{});
+            },
+            .AstTernary => {
+                std.debug.print("Ternary Expression\n", .{});
+
+                printDepth(depth + 1);
+                std.debug.print("Value if True:\n", .{});
+                self.printNode(node.as.AstTernary.value_if_true, depth + 2);
+
+                printDepth(depth + 1);
+                std.debug.print("Condition:\n", .{});
+                self.printNode(node.as.AstTernary.condition, depth + 2);
+
+                printDepth(depth + 1);
+                std.debug.print("Value if False:\n", .{});
+                self.printNode(node.as.AstTernary.value_if_false, depth + 2);
+            },
+            .AstReturn => {
+                std.debug.print("Return\n", .{});
+            },
             .AstBreak => {
                 std.debug.print("Break\n", .{});
             },
@@ -265,8 +297,18 @@ pub const Parser = struct {
             TokenType.Break => self.parseBreak(),
             TokenType.Continue => self.parseContinue(),
             TokenType.For => self.parseFor(),
+            TokenType.Return => self.parseReturn(),
             else => self.parseExpression(),
         };
+    }
+
+    fn parseReturn(self: *Parser) *ast.AstNode {
+        if (!self.expect(TokenType.Return)) {
+            return self.syntaxError("expected 'return'");
+        }
+
+        const expression = self.parseExpression();
+        return ast.AstReturnNode.new(self.alloc, expression);
     }
 
     fn parseFor(self: *Parser) *ast.AstNode {
@@ -342,6 +384,15 @@ pub const Parser = struct {
         };
 
         if (!self.expect(TokenType.Colon)) {
+            return body;
+        }
+
+        if (!self.match(TokenType.Newline)) {
+            const statement = self.parseNode();
+            body.append(self.alloc, statement) catch {
+                @panic("Failed to add statement into if body");
+            };
+
             return body;
         }
 
@@ -467,45 +518,10 @@ pub const Parser = struct {
         if (self.match(TokenType.SingleEquals)) {
             self.recede();
             return self.parseVariableDeclaration();
-        } else if (self.match(TokenType.LeftParen)) {
-            self.recede();
-            return self.parseCallExpression();
         }
 
         self.recede();
         return self.parseExpression();
-    }
-
-    fn parseCallExpression(self: *Parser) *ast.AstNode {
-        const node = self.parseExpression();
-        if (self.isErr(node)) {
-            return self.syntaxError("invalid syntax");
-        }
-
-        var parameters = std.ArrayList(*ast.AstNode).initCapacity(self.alloc, 4) catch {
-            @panic("Failed to allocate parameters for call expression.");
-        };
-
-        if (!self.expect(TokenType.LeftParen)) {
-            return self.syntaxError("expected '('");
-        }
-
-        while (!self.isEnd() and !self.match(TokenType.RightParen)) {
-            const expr = self.parseExpression();
-            parameters.append(self.alloc, expr) catch {
-                @panic("Failed to add expression to call expression parameters");
-            };
-        }
-
-        if (!self.expect(TokenType.RightParen)) {
-            return self.syntaxError("expected ')'");
-        }
-
-        while (self.match(TokenType.Newline)) {
-            self.advance();
-        }
-
-        return ast.AstCallExpressionNode.new(self.alloc, node, parameters);
     }
 
     fn parseVariableDeclaration(self: *Parser) *ast.AstNode {
@@ -535,7 +551,7 @@ pub const Parser = struct {
     }
 
     fn parseAssignment(self: *Parser) *ast.AstNode {
-        const left = self.parseLogicalOr();
+        const left = self.parseConditionalExpression();
         if (self.isErr(left)) return left;
 
         const assignment_ops = [_]TokenType{
@@ -581,6 +597,29 @@ pub const Parser = struct {
                     right,
                 );
             }
+        }
+
+        return left;
+    }
+
+    fn parseConditionalExpression(self: *Parser) *ast.AstNode {
+        const left = self.parseLogicalOr();
+        if (self.isErr(left)) return left;
+
+        if (self.match(TokenType.If)) {
+            self.advance();
+
+            const condition = self.parseLogicalOr();
+            if (self.isErr(condition)) return condition;
+
+            if (!self.expect(TokenType.Else)) {
+                return self.syntaxError("expected 'else' in conditional expression");
+            }
+
+            const value_if_false = self.parseConditionalExpression();
+            if (self.isErr(value_if_false)) return value_if_false;
+
+            return ast.AstTernaryNode.new(self.alloc, left, condition, value_if_false);
         }
 
         return left;
@@ -784,7 +823,51 @@ pub const Parser = struct {
             return ast.AstUnaryExpressionNode.new(self.alloc, right, operator);
         }
 
-        return self.parsePrimary();
+        return self.parsePostfix();
+    }
+
+    fn parsePostfix(self: *Parser) *ast.AstNode {
+        var left = self.parsePrimary();
+        if (self.isErr(left)) return left;
+
+        while (self.match(TokenType.LeftParen)) {
+            self.advance();
+
+            var parameters = std.ArrayList(*ast.AstNode).initCapacity(self.alloc, 4) catch {
+                @panic("Failed to allocate parameters for call expression.");
+            };
+
+            if (!self.match(TokenType.RightParen)) {
+                const expr = self.parseExpression();
+                if (self.isErr(expr)) return expr;
+
+                parameters.append(self.alloc, expr) catch {
+                    @panic("Failed to add expression to call expression parameters");
+                };
+
+                while (self.match(TokenType.Comma)) {
+                    self.advance();
+                    const param_expr = self.parseExpression();
+                    if (self.isErr(param_expr)) return param_expr;
+
+                    parameters.append(self.alloc, param_expr) catch {
+                        @panic("Failed to add expression to call expression parameters");
+                    };
+                }
+            }
+
+            if (!self.expect(TokenType.RightParen)) {
+                return self.syntaxError("expected ')'");
+            }
+
+            left = ast.AstCallExpressionNode.new(self.alloc, left, parameters);
+        }
+
+        while (self.match(TokenType.Newline)) {
+            self.advance();
+        }
+
+        return left;
     }
 
     fn parsePrimary(self: *Parser) *ast.AstNode {

@@ -7,7 +7,7 @@ pub const Program = struct {
     bytecode: std.ArrayList(u8),
     constantPool: std.ArrayList(object.Object),
     globalVariables: std.StringHashMap(object.Object),
-    // functionRegistry: std.StringHashMap([]const u8),
+    functionRegistry: std.StringHashMap([]const u8),
 };
 
 pub const Compiler = struct {
@@ -27,7 +27,7 @@ pub const Compiler = struct {
                     @panic("Failed to allocate memory for constant pool");
                 },
                 .globalVariables = std.StringHashMap(object.Object).init(alloc),
-                // .functionRegistry = std.StringHashMap([]const u8).init(alloc),
+                .functionRegistry = std.StringHashMap([]const u8).init(alloc),
             },
         };
     }
@@ -66,13 +66,50 @@ pub const Compiler = struct {
 
     pub fn print(self: *Compiler) void {
         std.debug.print("Bytecode:\n", .{});
-        for (self.program.bytecode.items, 0..) |byte, i| {
-            std.debug.print("{d:04}: {d}\n", .{ i, byte });
+
+        var i: usize = 0;
+        while (i < self.program.bytecode.items.len) {
+            const byte = self.program.bytecode.items[i];
+            std.debug.print("{d:04}: ", .{i});
+
+            if (std.meta.intToEnum(opcode, byte)) |instruction| {
+                switch (instruction) {
+                    .PushConstant => {
+                        i += 1;
+                        const constIdx = self.program.bytecode.items[i];
+                        std.debug.print("PushConstant {d}\n", .{constIdx});
+                    },
+                    .PushConstantWide => {
+                        i += 1;
+                        const lowByte = self.program.bytecode.items[i];
+                        i += 1;
+                        const highByte = self.program.bytecode.items[i];
+                        const constIdx = @as(u16, lowByte) | (@as(u16, highByte) << 8);
+                        std.debug.print("PushConstantWide {d}\n", .{constIdx});
+                    },
+                    .JumpIfFalse, .Jump => {
+                        i += 1;
+                        const lowByte = self.program.bytecode.items[i];
+                        i += 1;
+                        const highByte = self.program.bytecode.items[i];
+                        const offset = @as(u16, lowByte) | (@as(u16, highByte) << 8);
+                        const signedOffset: i16 = @bitCast(offset);
+                        std.debug.print("{s} {d}\n", .{ @tagName(instruction), signedOffset });
+                    },
+                    else => {
+                        std.debug.print("{s}\n", .{@tagName(instruction)});
+                    },
+                }
+            } else |_| {
+                std.debug.print("<data> {d}\n", .{byte});
+            }
+
+            i += 1;
         }
 
         std.debug.print("\nConstants:\n", .{});
-        for (self.program.constantPool.items, 0..) |val, i| {
-            std.debug.print("index: {d} = {any}\n", .{ i, val });
+        for (self.program.constantPool.items, 0..) |val, idx| {
+            std.debug.print("index: {d} = {any}\n", .{ idx, val });
         }
     }
 
@@ -98,8 +135,32 @@ pub const Compiler = struct {
             .AstWhileStatement => self.compileWhile(&node.as.AstWhileStatement),
             .AstBreak => self.compileBreak(&node.as.AstBreak),
             .AstContinue => self.compileContinue(&node.as.AstContinue),
+            .AstReturn => self.compileReturn(&node.as.AstReturn),
+            .AstTernary => self.compileTernary(&node.as.AstTernary),
             else => self.compilePrimaryExpression(node),
         }
+    }
+
+    fn compileTernary(self: *Compiler, node: *ast.AstTernaryNode) void {
+        self.compileNode(node.condition);
+
+        self.emitInstruction(opcode.JumpIfFalse);
+        const jumpOffset = self.program.bytecode.items.len;
+        self.emitByte(0x00);
+        self.emitByte(0x00);
+
+        self.compileNode(node.value_if_true);
+
+        self.emitInstruction(opcode.Jump);
+        const endOffset = self.program.bytecode.items.len;
+        self.emitByte(0x00);
+        self.emitByte(0x00);
+
+        self.patchJump(jumpOffset);
+
+        self.compileNode(node.value_if_false);
+
+        self.patchJump(endOffset);
     }
 
     fn compileBreak(self: *Compiler, node: *ast.AstBreakNode) void {
@@ -110,6 +171,11 @@ pub const Compiler = struct {
     fn compileContinue(self: *Compiler, node: *ast.AstContinueNode) void {
         _ = self;
         _ = node;
+    }
+
+    fn compileReturn(self: *Compiler, node: *ast.AstReturnNode) void {
+        self.compileNode(node.value);
+        self.emitInstruction(opcode.Return);
     }
 
     fn compileWhile(self: *Compiler, node: *ast.AstWhileStatementNode) void {
@@ -146,11 +212,11 @@ pub const Compiler = struct {
         self.emitInstruction(opcode.Nop);
     }
 
-    // thanks, Robert Nystrom
     fn patchJump(self: *Compiler, offset: usize) void {
         const jumpTarget = self.program.bytecode.items.len;
         const jumpOffset = jumpTarget - offset - 2;
 
+        // thanks, Robert Nystrom
         self.program.bytecode.items[offset] = @intCast(jumpOffset & 0xFF);
         self.program.bytecode.items[offset + 1] = @intCast((jumpOffset >> 8) & 0xFF);
     }
@@ -193,8 +259,31 @@ pub const Compiler = struct {
     }
 
     fn compileFunctionDefinition(self: *Compiler, node: *ast.AstFunctionDefinitionNode) void {
-        _ = self;
-        _ = node;
+        self.emitInstruction(opcode.Jump);
+
+        const skipJumpOffset = self.program.bytecode.items.len;
+        self.emitByte(0x00);
+        self.emitByte(0x00);
+
+        const functionStart = self.program.bytecode.items.len;
+
+        self.compileNodes(node.body);
+        self.emitInstruction(opcode.Return);
+
+        const functionEnd = self.program.bytecode.items.len;
+
+        const functionObj = object.Object.newFunctionObject(
+            node.name,
+            @intCast(node.arguments.items.len),
+            functionStart,
+            functionEnd,
+        );
+
+        self.program.globalVariables.put(node.name, functionObj) catch {
+            @panic("Failed to register function");
+        };
+
+        self.patchJump(skipJumpOffset);
     }
 
     fn compileCompoundAssignment(self: *Compiler, node: *ast.AstCompoundAssignmentNode) void {
